@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teachable Machine 體感冒險小遊戲</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- TensorFlow.js & Teachable Machine Image Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        gameDark: '#0f172a',
+                        gameCard: '#1e293b',
+                        accentBlue: '#3b82f6',
+                        accentGreen: '#10b981',
+                        accentYellow: '#f59e0b',
+                        accentPurple: '#8b5cf6'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom Styles & Canvas Glassmorphism */
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: #090d16;
+            color: #f1f5f9;
+        }
+        .glow-green { box-shadow: 0 0 15px rgba(16, 185, 129, 0.4); }
+        .glow-blue { box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }
+        .glow-yellow { box-shadow: 0 0 15px rgba(245, 158, 11, 0.4); }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-2 sm:p-4">
+
+    <!-- Navbar / Title -->
+    <header class="max-w-7xl w-full mx-auto mb-4 bg-gameCard/90 border border-slate-700/60 rounded-2xl p-4 shadow-xl flex flex-col md:flex-row justify-between items-center gap-4 backdrop-blur-md">
+        <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-xl bg-gradient-to-tr from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center text-white text-2xl shadow-lg">
+                <i class="fa-solid font-game fa-gamepad"></i>
+            </div>
+            <div>
+                <h1 class="text-xl sm:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-300 to-pink-400">
+                    AI 體感特工：Teachable Machine 小遊戲
+                </h1>
+                <p class="text-xs text-slate-400">使用「水壺」、「手機」、「錢包」操控角色冒險！</p>
+            </div>
+        </div>
+
+        <!-- Mode Indicator / Quick Status -->
+        <div class="flex items-center gap-2 bg-slate-900/80 px-4 py-2 rounded-xl border border-slate-800 text-xs sm:text-sm">
+            <span class="inline-block w-3 h-3 rounded-full bg-amber-500 animate-pulse" id="statusDot"></span>
+            <span id="statusText" class="text-slate-300 font-medium">尚未載入模型 (提供模擬測試)</span>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="max-w-7xl w-full mx-auto grid grid-cols-1 lg:grid-cols-12 gap-4 flex-grow">
+
+        <!-- LEFT PANEL: Camera & TM Control (4 Cols) -->
+        <section class="lg:col-span-4 flex flex-col gap-4">
+            
+            <!-- Model Input Card -->
+            <div class="bg-gameCard border border-slate-700/60 rounded-2xl p-4 shadow-lg">
+                <h2 class="text-sm font-semibold text-slate-300 mb-2 flex items-center gap-2">
+                    <i class="fa-solid fa-link text-indigo-400"></i> Teachable Machine 模型網址
+                </h2>
+                <div class="flex flex-col gap-2">
+                    <input type="text" id="modelUrlInput" 
+                        placeholder="https://teachablemachine.withgoogle.com/models/XXXXX/"
+                        class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors">
+                    <button id="loadModelBtn" 
+                        class="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-medium py-2 px-4 rounded-xl text-sm transition-all shadow-md active:scale-98 flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-cloud-arrow-down"></i> 載入模型並開啟相機
+                    </button>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-2 leading-relaxed">
+                    💡 模型標籤必須包含：<span class="text-emerald-400 font-semibold">水壺</span>、<span class="text-blue-400 font-semibold">手機</span>、<span class="text-amber-400 font-semibold">錢包</span>。若無網址可使用下方模擬按鈕測試。
+                </p>
+            </div>
+
+            <!-- Webcam & AI Detection Box -->
+            <div class="bg-gameCard border border-slate-700/60 rounded-2xl p-4 shadow-lg flex flex-col items-center">
+                <div class="w-full flex justify-between items-center mb-2">
+                    <span class="text-xs font-semibold text-slate-300 flex items-center gap-2">
+                        <i class="fa-solid fa-camera text-slate-400"></i> 即時影像與識別
+                    </span>
+                    <span id="fpsCounter" class="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-md">
+                        AI FPS: 0
+                    </span>
+                </div>
+
+                <!-- WebCam Frame Container -->
+                <div class="relative w-full aspect-video bg-slate-900 rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center group">
+                    <div id="webcamContainer" class="w-full h-full flex items-center justify-center">
+                        <div id="webcamPlaceholder" class="text-center p-4">
+                            <i class="fa-solid fa-video-slash text-4xl text-slate-600 mb-2"></i>
+                            <p class="text-xs text-slate-500">攝影機未啟動</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Cooldown Overlay Ring/Bar -->
+                    <div id="cooldownOverlay" class="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center hidden">
+                        <div class="text-center bg-slate-900/90 px-4 py-2 rounded-xl border border-slate-700 shadow-xl">
+                            <i class="fa-solid fa-hourglass-half text-amber-400 animate-spin text-xl mb-1"></i>
+                            <p class="text-xs text-amber-300 font-medium">動作冷卻中...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Classification Probabilities -->
+                <div class="w-full mt-3 flex flex-col gap-2" id="probabilityBars">
+                    <!-- Water Bottle -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-emerald-400 font-medium"><i class="fa-solid fa-bottle-water"></i> 水壺 (補充生命)</span>
+                            <span id="prob-water" class="text-slate-400">0%</span>
+                        </div>
+                        <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                            <div id="bar-water" class="bg-emerald-500 h-2 rounded-full transition-all duration-150" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <!-- Phone -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-blue-400 font-medium"><i class="fa-solid fa-mobile-screen-button"></i> 手機 (更新資訊)</span>
+                            <span id="prob-phone" class="text-slate-400">0%</span>
+                        </div>
+                        <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                            <div id="bar-phone" class="bg-blue-500 h-2 rounded-full transition-all duration-150" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <!-- Wallet -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-amber-400 font-medium"><i class="fa-solid fa-wallet"></i> 錢包 (購買武器)</span>
+                            <span id="prob-wallet" class="text-slate-400">0%</span>
+                        </div>
+                        <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                            <div id="bar-wallet" class="bg-amber-500 h-2 rounded-full transition-all duration-150" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Manual Test Trigger Controls (Simulation Mode) -->
+            <div class="bg-gameCard border border-slate-700/60 rounded-2xl p-4 shadow-lg">
+                <h3 class="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider flex items-center justify-between">
+                    <span><i class="fa-solid fa-vial text-purple-400"></i> 手動測試 / 模擬動作</span>
+                    <span class="text-[10px] text-slate-500">免視訊也可測試</span>
+                </h3>
+                <div class="grid grid-cols-4 gap-2">
+                    <button id="simAttackBtn" class="bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500/50 text-rose-300 p-2 rounded-xl text-xs flex flex-col items-center gap-1 transition-all">
+                        <i class="fa-solid fa-hand-fist text-lg"></i>
+                        <span>揮劍攻擊</span>
+                    </button>
+                    <button id="simWaterBtn" class="bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/50 text-emerald-300 p-2 rounded-xl text-xs flex flex-col items-center gap-1 transition-all">
+                        <i class="fa-solid fa-bottle-water text-lg"></i>
+                        <span>舉起水壺</span>
+                    </button>
+                    <button id="simPhoneBtn" class="bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/50 text-blue-300 p-2 rounded-xl text-xs flex flex-col items-center gap-1 transition-all">
+                        <i class="fa-solid fa-mobile-screen-button text-lg"></i>
+                        <span>使用手機</span>
+                    </button>
+                    <button id="simWalletBtn" class="bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/50 text-amber-300 p-2 rounded-xl text-xs flex flex-col items-center gap-1 transition-all">
+                        <i class="fa-solid fa-wallet text-lg"></i>
+                        <span>拿出錢包</span>
+                    </button>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- RIGHT PANEL: Canvas Game Screen & Character Dashboard (8 Cols) -->
+        <section class="lg:col-span-8 flex flex-col gap-4">
+            
+            <!-- Game Canvas Window -->
+            <div class="bg-gameCard border border-slate-700/60 rounded-2xl p-3 shadow-xl relative overflow-hidden flex flex-col">
+                <!-- Canvas Top Bar overlay -->
+                <div class="flex justify-between items-center px-2 py-1 mb-2 bg-slate-900/60 rounded-xl border border-slate-800">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xs text-indigo-300 font-bold"><i class="fa-solid fa-shield-halved"></i> 冒險地圖</span>
+                        <span id="locationTag" class="text-[11px] bg-indigo-950 text-indigo-300 px-2 py-0.5 rounded border border-indigo-800">神秘森林 Zone 1</span>
+                    </div>
+                    <div class="text-xs text-slate-400">
+                        目前動作：<span id="currentActionText" class="text-slate-200 font-bold">無</span>
+                    </div>
+                </div>
+
+                <!-- HTML5 Canvas -->
+                <div class="relative w-full aspect-[16/9] bg-slate-950 rounded-xl overflow-hidden border border-slate-800 shadow-inner">
+                    <!-- 錢包購物詢問橫幅 Prompt Banner -->
+                    <div id="shopPrompt" class="hidden absolute top-3 left-1/2 -translate-x-1/2 z-30 bg-amber-950/95 border border-amber-500/80 backdrop-blur-md text-slate-100 px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-3 transition-all animate-bounce">
+                        <div class="text-2xl">👛</div>
+                        <div class="text-xs">
+                            <p class="font-bold text-amber-300">偵測到錢包！</p>
+                            <p class="text-slate-300">是否要開啟武器商店購物？</p>
+                        </div>
+                        <div class="flex items-center gap-1.5 ml-2">
+                            <button id="confirmOpenShopBtn" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3 py-1 rounded-lg text-xs transition-all shadow">
+                                開啟商店
+                            </button>
+                            <button id="cancelOpenShopBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg text-xs border border-slate-700 transition-all">
+                                暫不開啟
+                            </button>
+                        </div>
+                    </div>
+                    <canvas id="gameCanvas" class="w-full h-full block"></canvas>
+                </div>
+            </div>
+
+            <!-- Character Info Dashboard & Action Logs -->
+            <div class="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                
+                <!-- Character Stats (7 Cols) -->
+                <div class="sm:col-span-7 bg-gameCard border border-slate-700/60 rounded-2xl p-4 shadow-lg flex flex-col justify-between">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
+                        <div class="flex items-center gap-3">
+                            <div id="heroAvatar" class="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white text-2xl shadow-md border border-indigo-400">
+                                🧙‍♂️
+                            </div>
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <h3 class="font-bold text-slate-100 text-base" id="heroName">勇者阿歐</h3>
+                                    <span class="text-xs bg-purple-900/80 text-purple-300 border border-purple-700 px-2 py-0.5 rounded-full font-semibold" id="heroLevel">Lv. 1</span>
+                                </div>
+                                <p class="text-xs text-slate-400" id="heroJob">體感特工</p>
+                            </div>
+                        </div>
+                        <!-- Coins -->
+                        <div class="bg-amber-950/60 border border-amber-800/80 px-3 py-1.5 rounded-xl flex items-center gap-2">
+                            <i class="fa-solid fa-coins text-amber-400 text-sm"></i>
+                            <span class="text-amber-300 font-bold text-sm" id="heroGold">150</span>
+                        </div>
+                    </div>
+
+                    <!-- Health Bar -->
+                    <div class="mb-3">
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-rose-400 font-semibold flex items-center gap-1">
+                                <i class="fa-solid fa-heart"></i> 生命值 (HP)
+                            </span>
+                            <span id="hpText" class="text-slate-300 font-medium">100 / 100</span>
+                        </div>
+                        <div class="w-full bg-slate-900 rounded-full h-3 p-0.5 border border-slate-800">
+                            <div id="hpBar" class="bg-gradient-to-r from-rose-500 to-emerald-400 h-2 rounded-full transition-all duration-300" style="width: 100%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Equipment & Combat Stats -->
+                    <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div class="bg-slate-900/80 border border-slate-800 p-2 rounded-xl">
+                            <span class="text-slate-400 block text-[10px]">當前裝備</span>
+                            <span id="heroWeapon" class="text-amber-300 font-bold text-xs truncate block mt-0.5">木劍 (+10)</span>
+                        </div>
+                        <div class="bg-slate-900/80 border border-slate-800 p-2 rounded-xl">
+                            <span class="text-slate-400 block text-[10px]">攻擊力</span>
+                            <span id="heroAtk" class="text-indigo-300 font-bold text-xs block mt-0.5">25</span>
+                        </div>
+                        <div class="bg-slate-900/80 border border-slate-800 p-2 rounded-xl">
+                            <span class="text-slate-400 block text-[10px]">防禦力</span>
+                            <span id="heroDef" class="text-emerald-300 font-bold text-xs block mt-0.5">12</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Event Logs & Message Box (5 Cols) -->
+                <div class="sm:col-span-5 bg-gameCard border border-slate-700/60 rounded-2xl p-4 shadow-lg flex flex-col">
+                    <h3 class="text-xs font-semibold text-slate-300 mb-2 flex items-center justify-between">
+                        <span><i class="fa-solid fa-scroll text-amber-400"></i> 冒險日誌</span>
+                        <span class="text-[10px] text-slate-500">最新事件</span>
+                    </h3>
+                    <div id="logBox" class="flex-grow h-36 bg-slate-950 rounded-xl p-2.5 border border-slate-800 text-xs overflow-y-auto custom-scrollbar flex flex-col gap-1.5">
+                        <div class="text-slate-500 italic">系統日誌已啟動...</div>
+                        <div class="text-indigo-300">🎮 歡迎進入 Teachable Machine 冒險小遊戲！</div>
+                    </div>
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- Custom Modal Message Container -->
+    <div id="modalBox" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl text-center">
+            <div id="modalIcon" class="text-4xl text-indigo-400 mb-3">
+                <i class="fa-solid fa-circle-info"></i>
+            </div>
+            <h3 id="modalTitle" class="text-lg font-bold text-slate-100 mb-1">訊息通知</h3>
+            <p id="modalMsg" class="text-sm text-slate-300 mb-4">內容訊息...</p>
+            <button id="modalCloseBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 px-6 rounded-xl text-sm transition-all shadow-md">
+                確定
+            </button>
+        </div>
+    </div>
+
+    <!-- Weapon Shop Modal (透過錢包動作開啟) -->
+    <div id="shopModal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-5 shadow-2xl flex flex-col gap-4">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <div class="flex items-center gap-2">
+                    <span class="text-2xl">👛</span>
+                    <div>
+                        <h3 class="text-lg font-bold text-slate-100">武器裝備購物單</h3>
+                        <p class="text-[11px] text-slate-400">挑選武器提升攻擊力！</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2 bg-amber-950/80 border border-amber-800/80 px-3 py-1.5 rounded-xl">
+                    <i class="fa-solid fa-coins text-amber-400"></i>
+                    <span id="shopGoldText" class="text-amber-300 font-bold text-sm">150</span>
+                </div>
+            </div>
+
+            <!-- Weapon List -->
+            <div id="shopWeaponList" class="flex flex-col gap-2.5 max-h-80 overflow-y-auto custom-scrollbar pr-1">
+                <!-- Dynamically generated weapon shop items -->
+            </div>
+
+            <div class="flex justify-end pt-2 border-t border-slate-800">
+                <button id="closeShopBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium px-5 py-2 rounded-xl text-sm transition-all border border-slate-700">
+                    關閉購物單
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Core Game Logic JavaScript -->
+    <script>
+        // ==========================================
+        // 1. GAME STATE & CONFIGURATION
+        // ==========================================
+        const CONFIG = {
+            CONFIDENCE_THRESHOLD: 0.85,  // 分類信心度門檻 (85%)
+            REQUIRED_FRAMES: 4,         // 必須連續偵測到的幀數
+            COOLDOWN_MS: 1500,          // 動作冷卻時間 (1.5 秒)
+            PREDICT_INTERVAL: 100       // AI 預測間隔 (100ms = 10 fps)
+        };
+
+        const MONSTER_DATABASE = [
+            { name: "野外史萊姆", emoji: "🟢", baseHp: 50, baseAtk: 8, baseDef: 2, gold: 35, exp: 20 },
+            { name: "森林哥布林", emoji: "👺", baseHp: 90, baseAtk: 16, baseDef: 5, gold: 70, exp: 45 },
+            { name: "洞穴骷髏兵", emoji: "💀", baseHp: 150, baseAtk: 25, baseDef: 10, gold: 120, exp: 80 },
+            { name: "荒野巨石怪", emoji: "🗿", baseHp: 240, baseAtk: 35, baseDef: 18, gold: 180, exp: 130 },
+            { name: "暗黑魔界龍", emoji: "🐉", baseHp: 400, baseAtk: 50, baseDef: 28, gold: 350, exp: 250 }
+        ];
+
+        const gameState = {
+            hero: {
+                name: "勇者阿歐",
+                level: 1,
+                hp: 100,
+                maxHp: 100,
+                gold: 150,
+                atk: 25,
+                def: 12,
+                weaponIndex: 0,
+                weapons: [
+                    { id: 0, name: "練習木劍", atkBonus: 10, cost: 0, icon: "🗡️", owned: true, desc: "新手冒險者使用的基礎木劍" },
+                    { id: 1, name: "精鋼鐵劍", atkBonus: 25, cost: 80, icon: "⚔️", owned: false, desc: "經過鍛造的堅固鋼鐵長劍" },
+                    { id: 2, name: "魔法光輝劍", atkBonus: 50, cost: 200, icon: "🪄", owned: false, desc: "注入元素魔法的輝煌之刃" },
+                    { id: 3, name: "烈焰斬魔刀", atkBonus: 90, cost: 450, icon: "🔥", owned: false, desc: "附帶強烈火焰的霸道巨刀" },
+                    { id: 4, name: "屠龍神器", atkBonus: 160, cost: 900, icon: "👑", owned: false, desc: "傳說中擊潰遠古巨龍的神器" }
+                ]
+            },
+            monsterStage: 0,
+            monster: {
+                name: "野外史萊姆",
+                emoji: "🟢",
+                hp: 50,
+                maxHp: 50,
+                atk: 8,
+                def: 2,
+                gold: 35,
+                exp: 20,
+                isAlive: true
+            },
+            heroAnim: { state: "idle", timer: 0 },
+            monsterAnim: { state: "idle", timer: 0 },
+            currentAction: "無",
+            isCooldown: false,
+            cooldownTimer: null,
+            monsterAutoAttackTimer: null,
+            model: null,
+            webcam: null,
+            isAiRunning: false,
+            lastPredictTime: 0,
+            fpsCount: 0,
+            lastFpsUpdate: Date.now()
+        };
+
+        // Consecutive frame counters for FSM Debounce
+        const frameCounters = {
+            '水壺': 0,
+            '手機': 0,
+            '錢包': 0
+        };
+
+        // Floating texts & visual particles array for canvas animation
+        let canvasParticles = [];
+        let floatingTexts = [];
+
+        // ==========================================
+        // 2. DOM ELEMENTS
+        // ==========================================
+        const modelUrlInput = document.getElementById('modelUrlInput');
+        const loadModelBtn = document.getElementById('loadModelBtn');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const webcamContainer = document.getElementById('webcamContainer');
+        const cooldownOverlay = document.getElementById('cooldownOverlay');
+        const fpsCounter = document.getElementById('fpsCounter');
+
+        // Stats UI Elements
+        const heroName = document.getElementById('heroName');
+        const heroLevel = document.getElementById('heroLevel');
+        const heroHpText = document.getElementById('hpText');
+        const heroHpBar = document.getElementById('hpBar');
+        const heroGold = document.getElementById('heroGold');
+        const heroWeapon = document.getElementById('heroWeapon');
+        const heroAtk = document.getElementById('heroAtk');
+        const heroDef = document.getElementById('heroDef');
+        const logBox = document.getElementById('logBox');
+        const currentActionText = document.getElementById('currentActionText');
+
+        // Probability elements
+        const probWater = document.getElementById('prob-water');
+        const barWater = document.getElementById('bar-water');
+        const probPhone = document.getElementById('prob-phone');
+        const barPhone = document.getElementById('bar-phone');
+        const probWallet = document.getElementById('prob-wallet');
+        const barWallet = document.getElementById('bar-wallet');
+
+        // Canvas Elements
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // ==========================================
+        // 3. CANVAS GAME RENDER LOOP & ANIMATIONS
+        // ==========================================
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        let animFrameId = null;
+        let gameTime = 0;
+
+        function renderGame() {
+            gameTime += 0.05;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const w = canvas.width;
+            const h = canvas.height;
+
+            // Draw Forest Background Gradient
+            const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
+            bgGrad.addColorStop(0, '#0a1128');
+            bgGrad.addColorStop(0.6, '#1c2d42');
+            bgGrad.addColorStop(1, '#0b131e');
+            ctx.fillStyle = bgGrad;
+            ctx.fillRect(0, 0, w, h);
+
+            // Draw Ground Surface
+            ctx.fillStyle = '#152331';
+            ctx.beginPath();
+            ctx.ellipse(w / 2, h - 30, w * 0.45, 25, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw Background Trees
+            ctx.fillStyle = '#1e3a4c';
+            for (let i = 0; i < 5; i++) {
+                const x = (w / 6) * (i + 0.8);
+                const treeH = 60 + Math.sin(i + gameTime * 0.5) * 5;
+                ctx.beginPath();
+                ctx.moveTo(x, h - 40);
+                ctx.lineTo(x - 20, h - 40 - treeH);
+                ctx.lineTo(x + 20, h - 40 - treeH);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            // ------------------------------------------
+            // HERO DRAWING
+            // ------------------------------------------
+            let heroX = w * 0.3;
+            const bounceY = Math.sin(gameTime * 3) * 5;
+            let heroY = h - 70 + bounceY;
+
+            // Attack Animation displacement
+            if (gameState.heroAnim.state === "attack") {
+                gameState.heroAnim.timer -= 0.1;
+                heroX += 40; // Shift toward monster on attack
+                if (gameState.heroAnim.timer <= 0) {
+                    gameState.heroAnim.state = "idle";
+                }
+            }
+
+            // Hero Shadow
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+            ctx.beginPath();
+            ctx.ellipse(heroX, h - 35, 25, 8, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Hero Action Aura
+            if (gameState.currentAction !== "無") {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(heroX, heroY - 20, 45, 0, Math.PI * 2);
+                ctx.fillStyle = gameState.currentAction === "攻擊" ? 'rgba(239, 68, 68, 0.3)' :
+                                gameState.currentAction === "水壺" ? 'rgba(16, 185, 129, 0.3)' :
+                                gameState.currentAction === "手機" ? 'rgba(59, 130, 246, 0.3)' : 'rgba(245, 158, 11, 0.3)';
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // Hero Emoji
+            ctx.font = '48px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('🧙‍♂️', heroX, heroY - 20);
+
+            // Sword Slash Effect during attack
+            if (gameState.heroAnim.state === "attack") {
+                ctx.save();
+                ctx.font = '36px sans-serif';
+                ctx.fillText('⚔️', heroX + 35, heroY - 25);
+                ctx.strokeStyle = '#fef08a';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(heroX + 30, heroY - 20, 35, -Math.PI / 3, Math.PI / 3);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // ------------------------------------------
+            // MONSTER DRAWING
+            // ------------------------------------------
+            if (gameState.monster.isAlive) {
+                let monsterX = w * 0.72;
+                let monsterY = h - 70 + Math.cos(gameTime * 2.5) * 4;
+
+                // Hurt Shake Animation
+                if (gameState.monsterAnim.state === "hurt") {
+                    gameState.monsterAnim.timer -= 0.1;
+                    monsterX += (Math.random() - 0.5) * 12;
+                    if (gameState.monsterAnim.timer <= 0) {
+                        gameState.monsterAnim.state = "idle";
+                    }
+                }
+
+                // Monster Shadow
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                ctx.beginPath();
+                ctx.ellipse(monsterX, h - 35, 28, 8, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Monster Emoji
+                ctx.font = '52px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(gameState.monster.emoji, monsterX, monsterY - 20);
+
+                // Monster Name & Health Bar Overhead
+                const mHpPct = Math.max(0, gameState.monster.hp / gameState.monster.maxHp);
+                ctx.fillStyle = '#f87171';
+                ctx.font = 'bold 12px Inter, sans-serif';
+                ctx.fillText(`${gameState.monster.name}`, monsterX, monsterY - 65);
+
+                // Monster HP Bar Outer
+                ctx.fillStyle = '#334155';
+                ctx.fillRect(monsterX - 35, monsterY - 55, 70, 7);
+                // Monster HP Bar Inner
+                ctx.fillStyle = mHpPct > 0.4 ? '#ef4444' : '#dc2626';
+                ctx.fillRect(monsterX - 35, monsterY - 55, 70 * mHpPct, 7);
+            } else {
+                // Defeated indicator
+                ctx.font = 'bold 16px Inter, sans-serif';
+                ctx.fillStyle = '#a855f7';
+                ctx.textAlign = 'center';
+                ctx.fillText('✨ 尋找下一個對手中...', w * 0.72, h - 70);
+            }
+
+            // ------------------------------------------
+            // PARTICLES & FLOATING DAMAGE TEXTS
+            // ------------------------------------------
+            for (let i = canvasParticles.length - 1; i >= 0; i--) {
+                const p = canvasParticles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.alpha -= 0.02;
+                if (p.alpha <= 0) {
+                    canvasParticles.splice(i, 1);
+                    continue;
+                }
+                ctx.save();
+                ctx.globalAlpha = p.alpha;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            for (let i = floatingTexts.length - 1; i >= 0; i--) {
+                const ft = floatingTexts[i];
+                ft.y -= 1.2;
+                ft.alpha -= 0.015;
+                if (ft.alpha <= 0) {
+                    floatingTexts.splice(i, 1);
+                    continue;
+                }
+                ctx.save();
+                ctx.globalAlpha = ft.alpha;
+                ctx.font = 'bold 20px Inter, sans-serif';
+                ctx.fillStyle = ft.color;
+                ctx.textAlign = 'center';
+                ctx.shadowColor = 'black';
+                ctx.shadowBlur = 5;
+                ctx.fillText(ft.text, ft.x, ft.y);
+                ctx.restore();
+            }
+
+            animFrameId = requestAnimationFrame(renderGame);
+        }
+
+        // Particle Spawner Helper
+        function createParticles(x, y, color, count = 15) {
+            for (let i = 0; i < count; i++) {
+                canvasParticles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 5,
+                    vy: (Math.random() - 0.5) * 5 - 1,
+                    size: Math.random() * 4 + 2,
+                    color: color,
+                    alpha: 1
+                });
+            }
+        }
+
+        // Start Monster Auto Attack Loop (每隔 3.5 秒怪物主動攻擊勇者)
+        function startMonsterAutoAttack() {
+            if (gameState.monsterAutoAttackTimer) {
+                clearInterval(gameState.monsterAutoAttackTimer);
+            }
+            
+            gameState.monsterAutoAttackTimer = setInterval(() => {
+                if (gameState.monster.isAlive && gameState.hero.hp > 0) {
+                    executeMonsterActiveAttack();
+                }
+            }, 3500);
+        }
+
+        // Monster Active Attack Execution
+        function executeMonsterActiveAttack() {
+            let mDmg = Math.max(4, gameState.monster.atk - gameState.hero.def + Math.floor(Math.random() * 5));
+            gameState.hero.hp = Math.max(0, gameState.hero.hp - mDmg);
+
+            const heroX = canvas.width * 0.3;
+            const heroY = canvas.height / 2 - 30;
+
+            createParticles(heroX, heroY, '#ef4444', 15);
+            addFloatingText(`-${mDmg} HP`, '#f87171', heroX, heroY);
+            addLog(`⚡ [怪物主動攻擊] ${gameState.monster.name} 發動襲擊！勇者受到了 ${mDmg} 點傷害！`, 'rose');
+
+            updateHeroStatsUI();
+
+            if (gameState.hero.hp <= 0) {
+                addLog(`💀 [勇者倒下] HP 歸零！請舉起【水壺】補充生命以復原戰鬥！`, 'rose');
+            }
+        }
+
+        function addFloatingText(text, color, customX = null, customY = null) {
+            floatingTexts.push({
+                text: text,
+                x: customX !== null ? customX : canvas.width * 0.3 + (Math.random() - 0.5) * 20,
+                y: customY !== null ? customY : canvas.height / 2 - 40,
+                color: color,
+                alpha: 1
+            });
+        }
+
+        // ==========================================
+        // 5. GAME ACTIONS & COMBAT MECHANICS
+        // ==========================================
+        function triggerAction(actionType) {
+            if (gameState.isCooldown) return;
+
+            // Lock Cooldown
+            gameState.isCooldown = true;
+            gameState.currentAction = actionType;
+            currentActionText.innerText = actionType;
+            cooldownOverlay.classList.remove('hidden');
+
+            // Reset frame counters
+            frameCounters['水壺'] = 0;
+            frameCounters['手機'] = 0;
+            frameCounters['錢包'] = 0;
+
+            // Execute corresponding action logic
+            if (actionType === "攻擊") {
+                executeAttackAction();
+            } else if (actionType === "水壺") {
+                executeWaterBottleAction();
+            } else if (actionType === "手機") {
+                executePhoneAction();
+            } else if (actionType === "錢包") {
+                executeWalletAction();
+            }
+
+            // Cooldown Release Timer
+            setTimeout(() => {
+                gameState.isCooldown = false;
+                gameState.currentAction = "無";
+                currentActionText.innerText = "無";
+                cooldownOverlay.classList.add('hidden');
+            }, CONFIG.COOLDOWN_MS);
+        }
+
+        // Action 0: 攻擊 -> Weapon Attack on Monster
+        function executeAttackAction() {
+            if (!gameState.monster.isAlive) {
+                addLog(`⚔️ [攻擊] 當前無目標可攻擊！`, 'amber');
+                return;
+            }
+
+            if (gameState.hero.hp <= 0) {
+                addLog(`💀 勇者已經力竭倒下！請先舉起【水壺】回復生命！`, 'rose');
+                showModal("勇者倒下", "生命值歸零，請舉起「水壺」補充生命以恢復戰鬥！");
+                return;
+            }
+
+            // Trigger Attack animation
+            gameState.heroAnim.state = "attack";
+            gameState.heroAnim.timer = 1.0;
+
+            // Calculate Damage
+            const currentWeapon = gameState.hero.weapons[gameState.hero.weaponIndex];
+            const weaponBonus = currentWeapon ? currentWeapon.atkBonus : 0;
+            const totalAtk = gameState.hero.atk + weaponBonus;
+            const isCrit = Math.random() < 0.25;
+            let damage = Math.max(5, totalAtk - gameState.monster.def + Math.floor(Math.random() * 6));
+            if (isCrit) damage = Math.floor(damage * 1.5);
+
+            // Apply Damage to Monster
+            gameState.monster.hp = Math.max(0, gameState.monster.hp - damage);
+            gameState.monsterAnim.state = "hurt";
+            gameState.monsterAnim.timer = 0.8;
+
+            const monsterX = canvas.width * 0.72;
+            const monsterY = canvas.height / 2 - 30;
+
+            createParticles(monsterX, monsterY, isCrit ? '#facc15' : '#ef4444', 20);
+            addFloatingText(isCrit ? `暴擊 -${damage}!` : `-${damage}`, isCrit ? '#facc15' : '#ef4444', monsterX, monsterY);
+            
+            addLog(`⚔️ [揮劍攻擊] 使用【${currentWeapon.name}】攻擊 ${gameState.monster.name}，造成 ${damage} 點傷害！`, isCrit ? 'amber' : 'rose');
+
+            // Monster Defeated Check
+            if (gameState.monster.hp <= 0) {
+                gameState.monster.isAlive = false;
+
+                // 獲得金幣獎勵！
+                const goldReward = gameState.monster.gold;
+                gameState.hero.gold += goldReward;
+
+                createParticles(monsterX, monsterY, '#f59e0b', 35);
+                addLog(`💰 [打倒怪物] 成功戰勝了 ${gameState.monster.name}！獲得 +${goldReward} 金幣獎勵！`, 'emerald');
+                addFloatingText(`勝利！ +${goldReward} 金幣 🪙`, '#f59e0b', monsterX, monsterY - 30);
+
+                updateHeroStatsUI();
+
+                // Spawn Next Monster after delay
+                setTimeout(() => {
+                    spawnNextMonster();
+                }, 2000);
+            } else {
+                // Monster Counter-Attack
+                setTimeout(() => {
+                    monsterCounterAttack();
+                }, 400);
+            }
+        }
+
+        // Monster Counter Attack Logic
+        function monsterCounterAttack() {
+            if (!gameState.monster.isAlive || gameState.hero.hp <= 0) return;
+
+            let mDmg = Math.max(3, gameState.monster.atk - gameState.hero.def + Math.floor(Math.random() * 4));
+            gameState.hero.hp = Math.max(0, gameState.hero.hp - mDmg);
+
+            const heroX = canvas.width * 0.3;
+            const heroY = canvas.height / 2 - 30;
+
+            createParticles(heroX, heroY, '#f87171', 12);
+            addFloatingText(`-${mDmg} HP`, '#f87171', heroX, heroY);
+            addLog(`💥 [怪物反擊] ${gameState.monster.name} 反擊！勇者受到了 ${mDmg} 點傷害。`, 'rose');
+
+            updateHeroStatsUI();
+        }
+
+        // Spawn Next Monster / Stage Progressive
+        function spawnNextMonster() {
+            gameState.monsterStage++;
+            const templateIndex = Math.min(gameState.monsterStage, MONSTER_DATABASE.length - 1);
+            const template = MONSTER_DATABASE[templateIndex];
+
+            // Scale monster stats slightly
+            const levelMult = 1 + (gameState.monsterStage - templateIndex) * 0.35;
+            gameState.monster = {
+                name: template.name,
+                emoji: template.emoji,
+                hp: Math.floor(template.baseHp * levelMult),
+                maxHp: Math.floor(template.baseHp * levelMult),
+                atk: Math.floor(template.baseAtk * levelMult),
+                def: Math.floor(template.baseDef * levelMult),
+                gold: Math.floor(template.gold * levelMult),
+                exp: template.exp,
+                isAlive: true
+            };
+
+            const locationTag = document.getElementById('locationTag');
+            if (locationTag) locationTag.innerText = `冒險區域 Zone ${gameState.monsterStage + 1}`;
+
+            addLog(`👾 新的強敵【${gameState.monster.name}】出現了！準備迎戰！`, 'blue');
+        }
+
+        // Action 1: 水壺 -> Recover HP & Revive
+        function executeWaterBottleAction() {
+            const healAmount = 35;
+            const oldHp = gameState.hero.hp;
+            gameState.hero.hp = Math.min(gameState.hero.maxHp, gameState.hero.hp + healAmount);
+            const actualHealed = gameState.hero.hp - oldHp;
+
+            updateHeroStatsUI();
+            createParticles(canvas.width * 0.3, canvas.height / 2 - 20, '#10b981', 25);
+            addFloatingText(`+${actualHealed} HP`, '#10b981');
+            addLog(`🥤 [水壺動作] 暢飲甘泉！恢復了 ${actualHealed} 點生命值。`, 'emerald');
+        }
+
+        // Action 2: 手機 -> Update & Upgrade Character Info
+        function executePhoneAction() {
+            gameState.hero.level += 1;
+            gameState.hero.maxHp += 15;
+            gameState.hero.hp = Math.min(gameState.hero.maxHp, gameState.hero.hp + 15);
+            gameState.hero.atk += 4;
+            gameState.hero.def += 2;
+            gameState.hero.gold += 35;
+
+            updateHeroStatsUI();
+            createParticles(canvas.width * 0.3, canvas.height / 2 - 20, '#3b82f6', 25);
+            addFloatingText(`LEVEL UP! Lv.${gameState.hero.level}`, '#3b82f6');
+            addLog(`📱 [手機動作] 查閱戰術攻略！等級提升至 Lv.${gameState.hero.level}，獲得 +35 金幣！`, 'blue');
+        }
+
+        // Action 3: 錢包 -> 顯示購物詢問選項 (不直接開啟商店，讓玩家自主選擇)
+        function executeWalletAction() {
+            showShopPrompt();
+            addLog(`👛 [錢包動作] 偵測到錢包！已顯示購物詢問選項。`, 'amber');
+        }
+
+        // 顯示 / 隱藏 購物詢問 Banner
+        function showShopPrompt() {
+            const prompt = document.getElementById('shopPrompt');
+            if (prompt) prompt.classList.remove('hidden');
+        }
+
+        function hideShopPrompt() {
+            const prompt = document.getElementById('shopPrompt');
+            if (prompt) prompt.classList.add('hidden');
+        }
+
+        // 綁定購物詢問按鈕事件
+        document.getElementById('confirmOpenShopBtn')?.addEventListener('click', () => {
+            hideShopPrompt();
+            openShopModal();
+        });
+
+        document.getElementById('cancelOpenShopBtn')?.addEventListener('click', () => {
+            hideShopPrompt();
+        });
+
+        // 開啟武器商店購物單 Window
+        function openShopModal() {
+            renderShopUI();
+            document.getElementById('shopModal').classList.remove('hidden');
+        }
+
+        function closeShopModal() {
+            document.getElementById('shopModal').classList.add('hidden');
+        }
+
+        document.getElementById('closeShopBtn').addEventListener('click', closeShopModal);
+
+        // 渲染武器購物單 UI
+        function renderShopUI() {
+            const shopGoldText = document.getElementById('shopGoldText');
+            if (shopGoldText) shopGoldText.innerText = gameState.hero.gold;
+
+            const shopWeaponList = document.getElementById('shopWeaponList');
+            if (!shopWeaponList) return;
+
+            shopWeaponList.innerHTML = '';
+
+            gameState.hero.weapons.forEach((wpn, idx) => {
+                const isEquipped = gameState.hero.weaponIndex === idx;
+                const canAfford = gameState.hero.gold >= wpn.cost;
+
+                const itemCard = document.createElement('div');
+                itemCard.className = `bg-slate-950/80 border ${isEquipped ? 'border-amber-500 bg-amber-950/20' : 'border-slate-800'} rounded-xl p-3 flex items-center justify-between gap-3 transition-all`;
+
+                itemCard.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="text-3xl bg-slate-900 w-11 h-11 rounded-lg flex items-center justify-center border border-slate-800">
+                            ${wpn.icon}
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h4 class="font-bold text-slate-200 text-sm">${wpn.name}</h4>
+                                <span class="text-[10px] bg-indigo-950 text-indigo-300 border border-indigo-800 px-1.5 py-0.5 rounded font-semibold">+${wpn.atkBonus} 攻擊</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 mt-0.5">${wpn.desc}</p>
+                        </div>
+                    </div>
+                    <div class="flex flex-col items-end gap-1 min-w-[90px]">
+                        ${!wpn.owned ? `
+                            <span class="text-xs font-bold text-amber-400 flex items-center gap-1">
+                                <i class="fa-solid fa-coins text-[10px]"></i> ${wpn.cost} G
+                            </span>
+                        ` : ''}
+                        
+                        ${isEquipped ? `
+                            <button disabled class="w-full bg-emerald-600/30 text-emerald-300 border border-emerald-500/50 text-xs py-1.5 px-3 rounded-lg font-bold flex items-center justify-center gap-1">
+                                <i class="fa-solid fa-check"></i> 裝備中
+                            </button>
+                        ` : wpn.owned ? `
+                            <button onclick="buyOrEquipWeapon(${idx})" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-xs py-1.5 px-3 rounded-lg font-bold transition-all shadow">
+                                裝備此劍
+                            </button>
+                        ` : canAfford ? `
+                            <button onclick="buyOrEquipWeapon(${idx})" class="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs py-1.5 px-3 rounded-lg font-bold transition-all shadow">
+                                購買裝備
+                            </button>
+                        ` : `
+                            <button disabled class="w-full bg-slate-800 text-slate-500 border border-slate-700 text-xs py-1.5 px-3 rounded-lg font-bold">
+                                金幣不足
+                            </button>
+                        `}
+                    </div>
+                `;
+
+                shopWeaponList.appendChild(itemCard);
+            });
+        }
+
+        // 購買或更換裝備處理函數
+        window.buyOrEquipWeapon = function(weaponIndex) {
+            const wpn = gameState.hero.weapons[weaponIndex];
+            if (!wpn) return;
+
+            if (!wpn.owned) {
+                if (gameState.hero.gold >= wpn.cost) {
+                    gameState.hero.gold -= wpn.cost;
+                    wpn.owned = true;
+                    gameState.hero.weaponIndex = weaponIndex;
+
+                    addLog(`🛍️ [購物成功] 花費 ${wpn.cost} 金幣購買並裝備了【${wpn.name}】！`, 'amber');
+                    createParticles(canvas.width * 0.3, canvas.height / 2 - 20, '#f59e0b', 25);
+                    addFloatingText(`裝備【${wpn.name}】!`, '#f59e0b');
+                }
+            } else {
+                gameState.hero.weaponIndex = weaponIndex;
+                addLog(`⚔️ [切換裝備] 勇者重新裝備了【${wpn.name}】！`, 'blue');
+            }
+
+            updateHeroStatsUI();
+            renderShopUI();
+        };
+
+        // Update UI Stats Elements
+        function updateHeroStatsUI() {
+            heroName.innerText = gameState.hero.name;
+            heroLevel.innerText = `Lv. ${gameState.hero.level}`;
+            heroHpText.innerText = `${gameState.hero.hp} / ${gameState.hero.maxHp}`;
+            
+            const hpPercent = Math.max(0, (gameState.hero.hp / gameState.hero.maxHp) * 100);
+            heroHpBar.style.width = `${hpPercent}%`;
+
+            heroGold.innerText = gameState.hero.gold;
+            
+            const currentWpn = gameState.hero.weapons[gameState.hero.weaponIndex] || gameState.hero.weapons[0];
+            heroWeapon.innerText = `${currentWpn.name} (+${currentWpn.atkBonus})`;
+            heroAtk.innerText = gameState.hero.atk + currentWpn.atkBonus;
+            heroDef.innerText = gameState.hero.def;
+        }
+
+        // ==========================================
+        // 6. HELPER FUNCTIONS (Log, Modal, Status, Simulation)
+        // ==========================================
+        function addLog(msg, type = 'default') {
+            if (!logBox) return;
+            const item = document.createElement('div');
+            if (type === 'emerald') item.className = 'text-emerald-400';
+            else if (type === 'rose') item.className = 'text-rose-400';
+            else if (type === 'amber') item.className = 'text-amber-400';
+            else if (type === 'blue') item.className = 'text-blue-400';
+            else item.className = 'text-slate-300';
+            
+            item.innerText = msg;
+            logBox.appendChild(item);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        function showModal(title, msg) {
+            const modalBox = document.getElementById('modalBox');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalMsg = document.getElementById('modalMsg');
+            if (modalTitle) modalTitle.innerText = title;
+            if (modalMsg) modalMsg.innerText = msg;
+            if (modalBox) modalBox.classList.remove('hidden');
+        }
+
+        document.getElementById('modalCloseBtn')?.addEventListener('click', () => {
+            document.getElementById('modalBox')?.classList.add('hidden');
+        });
+
+        function updateStatus(type, text) {
+            if (!statusDot || !statusText) return;
+            statusText.innerText = text;
+            if (type === 'loading') {
+                statusDot.className = 'inline-block w-3 h-3 rounded-full bg-amber-500 animate-pulse';
+            } else if (type === 'ready') {
+                statusDot.className = 'inline-block w-3 h-3 rounded-full bg-emerald-500 animate-pulse';
+            } else if (type === 'error') {
+                statusDot.className = 'inline-block w-3 h-3 rounded-full bg-rose-500';
+            } else {
+                statusDot.className = 'inline-block w-3 h-3 rounded-full bg-slate-500';
+            }
+        }
+
+        // 綁定手動模擬測試按鈕事件
+        document.getElementById('simAttackBtn')?.addEventListener('click', () => triggerAction('攻擊'));
+        document.getElementById('simWaterBtn')?.addEventListener('click', () => triggerAction('水壺'));
+        document.getElementById('simPhoneBtn')?.addEventListener('click', () => triggerAction('手機'));
+        document.getElementById('simWalletBtn')?.addEventListener('click', () => triggerAction('錢包'));
+
+        // Initial Initialization
+        window.onload = function() {
+            updateHeroStatsUI();
+            renderGame();
+            startMonsterAutoAttack(); // 啟動怪物主動攻擊計時器
+        };
+
+        // ==========================================
+        // 7. TEACHABLE MACHINE MODEL & WEBCAM LOGIC
+        // ==========================================
+        loadModelBtn.addEventListener('click', loadTeachableMachineModel);
+        modelUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') loadTeachableMachineModel();
+        });
+
+        async function loadTeachableMachineModel() {
+            let url = modelUrlInput.value.trim();
+            if (!url) {
+                showModal("提示", "請輸入有效的 Teachable Machine 模型網址！");
+                return;
+            }
+
+            // 自動修正並整理網址格式 (包含相容貼上包含 model.json 的完整連結)
+            if (url.endsWith('model.json')) {
+                url = url.substring(0, url.length - 'model.json'.length);
+            }
+            if (!url.endsWith('/')) {
+                url += '/';
+            }
+
+            const modelURL = url + "model.json";
+            const metadataURL = url + "metadata.json";
+
+            try {
+                updateStatus("loading", "正在載入模型檔...");
+                loadModelBtn.disabled = true;
+                loadModelBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> 載入中...`;
+
+                // 載入 Teachable Machine Image 模型
+                gameState.model = await tmImage.load(modelURL, metadataURL);
+                addLog("✅ 成功載入 Teachable Machine AI 模型！", "emerald");
+
+                updateStatus("loading", "正在啟動網路攝影機...");
+
+                // 設定網路攝影機
+                const flip = true; // 鏡像翻轉
+                gameState.webcam = new tmImage.Webcam(320, 240, flip);
+                await gameState.webcam.setup();
+                await gameState.webcam.play();
+
+                // 渲染相機畫面上傳至 UI Container
+                webcamContainer.innerHTML = '';
+                webcamContainer.appendChild(gameState.webcam.canvas);
+                gameState.webcam.canvas.className = "w-full h-full object-cover rounded-xl";
+
+                gameState.isAiRunning = true;
+                updateStatus("ready", "AI 體感辨識運作中");
+                addLog("🎥 網路攝影機啟動成功！請對著鏡頭展示【水壺】、【手機】或【錢包】。", "blue");
+
+                // 啟動 AI 辨識迴圈
+                requestAnimationFrame(aiLoop);
+            } catch (err) {
+                console.error(err);
+                updateStatus("error", "載入失敗 (請檢查網址與相機權限)");
+                addLog(`❌ 載入模型或相機失敗: ${err.message || '網址無效或無法存取相機'}`, "rose");
+                showModal("載入失敗", "無法讀取模型或取得攝影機權限！請確認網址格式為 https://teachablemachine.withgoogle.com/models/XXXXX/ 並允許相機存取權限。");
+            } finally {
+                loadModelBtn.disabled = false;
+                loadModelBtn.innerHTML = `<i class="fa-solid fa-cloud-arrow-down"></i> 載入模型並開啟相機`;
+            }
+        }
+
+        async function aiLoop() {
+            if (!gameState.isAiRunning) return;
+
+            if (gameState.webcam) {
+                gameState.webcam.update();
+                await predict();
+            }
+
+            // 計算 AI 辨識幀率 FPS
+            const now = Date.now();
+            gameState.fpsCount++;
+            if (now - gameState.lastFpsUpdate >= 1000) {
+                fpsCounter.innerText = `AI FPS: ${gameState.fpsCount}`;
+                gameState.fpsCount = 0;
+                gameState.lastFpsUpdate = now;
+            }
+
+            requestAnimationFrame(aiLoop);
+        }
+
+        async function predict() {
+            if (!gameState.model || !gameState.webcam) return;
+
+            const predictions = await gameState.model.predict(gameState.webcam.canvas);
+            
+            const probMap = { '水壺': 0, '手機': 0, '錢包': 0 };
+
+            // 彈性比對 Class 標籤名稱
+            for (let i = 0; i < predictions.length; i++) {
+                const className = predictions[i].className;
+                const prob = predictions[i].probability;
+
+                if (className.includes('水壺') || className.toLowerCase().includes('bottle') || className.toLowerCase().includes('water')) {
+                    probMap['水壺'] = Math.max(probMap['水壺'], prob);
+                } else if (className.includes('手機') || className.toLowerCase().includes('phone') || className.toLowerCase().includes('mobile')) {
+                    probMap['手機'] = Math.max(probMap['手機'], prob);
+                } else if (className.includes('錢包') || className.toLowerCase().includes('wallet') || className.toLowerCase().includes('purse')) {
+                    probMap['錢包'] = Math.max(probMap['錢包'], prob);
+                }
+            }
+
+            // 更新即時機率條 UI
+            updateProbUI(probMap);
+
+            // 若處於冷卻中，不觸發新動作
+            if (gameState.isCooldown) return;
+
+            // 門檻與防抖動 (Debounce) 計算
+            let highestAction = null;
+            let highestProb = 0;
+
+            for (const action in probMap) {
+                const prob = probMap[action];
+                if (prob >= CONFIG.CONFIDENCE_THRESHOLD) {
+                    frameCounters[action] = (frameCounters[action] || 0) + 1;
+                    if (prob > highestProb) {
+                        highestProb = prob;
+                        highestAction = action;
+                    }
+                } else {
+                    frameCounters[action] = 0;
+                }
+            }
+
+            // 連續幀數達標時觸發體感動作
+            if (highestAction && frameCounters[highestAction] >= CONFIG.REQUIRED_FRAMES) {
+                triggerAction(highestAction);
+            }
+        }
+
+        function updateProbUI(probMap) {
+            if (probWater && barWater) {
+                const pWater = Math.round((probMap['水壺'] || 0) * 100);
+                probWater.innerText = `${pWater}%`;
+                barWater.style.width = `${pWater}%`;
+            }
+            if (probPhone && barPhone) {
+                const pPhone = Math.round((probMap['手機'] || 0) * 100);
+                probPhone.innerText = `${pPhone}%`;
+                barPhone.style.width = `${pPhone}%`;
+            }
+            if (probWallet && barWallet) {
+                const pWallet = Math.round((probMap['錢包'] || 0) * 100);
+                probWallet.innerText = `${pWallet}%`;
+                barWallet.style.width = `${pWallet}%`;
+            }
+        }
+    </script>
+</body>
+</html>
